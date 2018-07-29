@@ -1,0 +1,61 @@
+#!/usr/local/bin/perl
+use strict;
+my $URL = "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts";
+my $outfile = shift @ARGV || "/etc/hosts";
+-w "$outfile" or die "permission needed to write output file\n";
+
+sub download_blacklist() {
+    open my $B, "curl -s $URL |" or die $!;
+    my @badhosts;
+    my $n=0;
+    while (<$B>) {
+	# prevent DNS attacks via poisoned hosts file by accepting only
+	# black lists...
+	if (/^0.0.0.0\s+(.*)/) {
+	    push(@badhosts, $1);
+	    $n++;
+	}
+	if ($n > 1000000) {
+	    print STDERR "downloaded data seems too big\n";
+	    exit 1;
+	}
+    }
+    close $B;
+    if ($n < 1000) {
+	print STDERR "downloaded data seems to be too small\n";
+	exit 1;
+    }
+    my $newdata;
+    foreach my $badhost (sort @badhosts) {
+	$newdata .= "0.0.0.0 $badhost\n";
+    }
+    print "$0.download  n_entries:$n  url:'$URL'\n";
+    return $newdata;
+}
+
+sub read_hosts() {
+    open my $R, "<$outfile" or die $!;
+    my $contents;
+    while (<$R>) {
+	if (/begin-black-list/ || /This hosts file is a merged collection of hosts/) {
+	    last;
+	}
+	$contents .= $_;
+    }
+    return $contents;
+}
+
+sub write_newfile($$) {
+    my ($olddata,$newdata) = @_;
+    open my $W, ">$outfile.new" or die $!;
+    print $W $olddata;
+    print $W "# begin-black-list -- everything below this line gets deleted\n";
+    print $W $newdata;
+    close $W or die $!;
+    system("mv $outfile.new $outfile");
+}
+
+my $newdata = download_blacklist();
+my $olddata = read_hosts();
+write_newfile($olddata,$newdata);
+1;
